@@ -1,0 +1,4 @@
+fal-client
+requests
+pathlib
+PyQt6
