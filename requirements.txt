@@ -2,3 +2,5 @@ fal-client
 requests
 pathlib
 PyQt6
+python-dotenv
+google-generativeai
