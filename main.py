@@ -40,23 +40,35 @@ def is_image_file(filename):
 
 def upscale_image(image_path, **kwargs):
     try:
+        # Check for JSON file and load prompt if it exists
+        json_path = image_path.with_suffix('.json')
+        if json_path.exists():
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                    kwargs['prompt'] = json_data.get('prompt', kwargs.get('prompt'))
+                    print(f"Loaded prompt from {json_path}: {kwargs['prompt']}")
+            except Exception as e:
+                print(f"Error loading JSON file {json_path}: {str(e)}")
+        
         # Upload the image to fal.ai
         print(f"Uploading {image_path}...")
         image_url = fal_client.upload_file(str(image_path))
         
         print(f"Processing {image_path}...")
+        print(f"Using settings: {json.dumps(kwargs, indent=2)}")
+        
         result = fal_client.subscribe(
             "fal-ai/clarity-upscaler",
             arguments={
                 "image_url": image_url,
                 "upscale_factor": kwargs.get("upscale_factor", 2),
-                "creativity": kwargs.get("creativity", 0.35),        # Controls deviation from original (0-1)
-                "resemblance": kwargs.get("resemblance", 0.6),        # Controls similarity to original (0-1)
+                "creativity": kwargs.get("creativity", 0.35),
+                "resemblance": kwargs.get("resemblance", 0.6),
                 "prompt": kwargs.get("prompt", "masterpiece, best quality, highres"),
                 "negative_prompt": kwargs.get("negative_prompt", "(worst quality, low quality, normal quality:2)"),
-                "guidance_scale": 4,       # How closely to follow prompt (1-20)
-                "num_inference_steps": kwargs.get("num_inference_steps", 18),  # More steps = higher quality but slower
-                # "seed": 42,              # Optional: for reproducible results
+                "guidance_scale": 4,
+                "num_inference_steps": kwargs.get("num_inference_steps", 18),
                 "enable_safety_checker": kwargs.get("enable_safety_checker", True)
             }
         )
@@ -74,9 +86,11 @@ def upscale_image(image_path, **kwargs):
             f.write(response.content)
             
         print(f"Saved upscaled image to {output_path}")
+        return True
         
     except Exception as e:
         print(f"Error processing {image_path}: {str(e)}")
+        return False
 
 def describe_image(image_path):
     """Describe an image using Gemini API and save the result as JSON"""
@@ -126,11 +140,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Processing Tool")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(800, 600)  # Increased size to accommodate debug output
 
-        # Create central widget with tabs
+        # Create main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout(main_widget)
+
+        # Create tabs
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        main_layout.addWidget(self.tabs)
 
         # Create tabs
         self.describe_tab = QWidget()
@@ -143,6 +162,16 @@ class MainWindow(QMainWindow):
         # Setup both tabs
         self.setup_describe_tab()
         self.setup_upscale_tab()
+
+        # Add debug output
+        self.debug_output = QTextEdit()
+        self.debug_output.setReadOnly(True)
+        self.debug_output.setMinimumHeight(150)
+        main_layout.addWidget(QLabel("Debug Output:"))
+        main_layout.addWidget(self.debug_output)
+
+        # Redirect stdout to debug output
+        sys.stdout = DebugStream(self.debug_output)
 
     def setup_describe_tab(self):
         layout = QVBoxLayout(self.describe_tab)
@@ -285,11 +314,24 @@ class MainWindow(QMainWindow):
             settings = self.get_settings()
             
             # Process each image with current settings
+            success_count = 0
             for image_file in image_files:
-                upscale_image(image_file, **settings)
-                sleep(1)  # Small delay between requests to avoid rate limiting
+                if upscale_image(image_file, **settings):
+                    success_count += 1
+                sleep(1)  # Small delay between requests
             
-            self.upscale_status_label.setText("Processing complete!")
+            self.upscale_status_label.setText(f"Processing complete! Successfully upscaled {success_count} images.")
+
+# Add DebugStream class to handle stdout redirection
+class DebugStream:
+    def __init__(self, text_widget):
+        self.text_widget = text_widget
+
+    def write(self, text):
+        self.text_widget.append(text)
+
+    def flush(self):
+        pass
 
 def main():
     app = QApplication(sys.argv)
